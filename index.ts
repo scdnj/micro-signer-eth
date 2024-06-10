@@ -67,6 +67,9 @@ function mapToArray(input: RawTxMap): RawTx {
 }
 
 function normalizeField(field: Field, value: string | number | bigint): string {
+  if (field === 'gasLimit' && !value) {
+    value = '0x5208'; // 21000, default / minimum
+  }
   if (['nonce', 'gasPrice', 'gasLimit', 'value'].includes(field)) {
     if (typeof value === 'number' || typeof value === 'bigint') {
       value = value.toString(16);
@@ -74,29 +77,21 @@ function normalizeField(field: Field, value: string | number | bigint): string {
     if (typeof value === 'string') {
       if (['0', '00', '0x', '0x00'].includes(value)) value = '';
     } else {
-      throw new TypeError('Invalid type');
+      throw new TypeError(`Invalid type for field ${field}`);
     }
   }
-  if (field === 'gasLimit' && !value) {
-    value = '0x5208'; // 21000, default / minimum
-  }
-  if (['gasPrice', 'value'].includes(field) && !value) {
+  if (['gasPrice'].includes(field) && !value) {
     throw new TypeError('The field must have non-zero value');
   }
-  if (['v', 'r', 's'].includes(field) && !value) return '';
+  if (['v', 'r', 's', 'data'].includes(field) && !value) return '';
   if (typeof value !== 'string') throw new TypeError(`Invalid type for field ${field}`);
   return value;
 }
 
 function rawToSerialized(input: RawTx | RawTxMap) {
-  let array = Array.isArray(input) ? input : mapToArray(input);
-  for (let i = 0; i < array.length; i++) {
-    const field = FIELDS[i];
-    const value = array[i];
-    const adjusted = normalizeField(field, value);
-    if (typeof value === 'string') array[i] = add0x(adjusted);
-  }
-  return add0x(bytesToHex(rlp.encode(array)));
+  const initial = Array.isArray(input) ? input : mapToArray(input);
+  const normalized = initial.map((value, i) => add0x(normalizeField(FIELDS[i], value)))
+  return add0x(bytesToHex(rlp.encode(normalized)));
 }
 
 export const Address = {
@@ -118,6 +113,7 @@ export const Address = {
   // NOTE: it hashes *string*, not a bytearray: keccak('beef') not keccak([0xbe, 0xef])
   checksum(nonChecksummedAddress: string): string {
     const addr = strip0x(nonChecksummedAddress.toLowerCase());
+    if (addr.length !== 40) throw new Error('Invalid address, must have 40 chars')
     const hash = strip0x(keccak256(addr));
     let checksummed = '';
     for (let i = 0; i < addr.length; i++) {
@@ -132,6 +128,7 @@ export const Address = {
 
   verifyChecksum(address: string): boolean {
     const addr = strip0x(address);
+    if (addr.length !== 40) throw new Error('Invalid address, must have 40 chars')
     if (addr === addr.toLowerCase() || addr === addr.toUpperCase()) return true;
     const hash = keccak256(addr.toLowerCase());
     for (let i = 0; i < 40; i++) {
@@ -146,7 +143,7 @@ export const Address = {
 };
 
 export class Transaction {
-  static DEFAULT_HARDFORK = 'muirGlacier';
+  static DEFAULT_HARDFORK = 'berlin';
   static DEFAULT_CHAIN: Chain = 'mainnet';
   readonly hex: string;
   readonly raw: RawTxMap;
